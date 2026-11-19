@@ -240,9 +240,27 @@ export class GitHubClient {
   }
 
   async addLabelsToPullRequest(pr: string, labels: string[]): Promise<void> {
-    const args = ["pr", "edit", pr, "--repo", this.repoArg];
+    // Deliberately uses the REST issues endpoint instead of
+    // `gh pr edit <pr> --add-label <label>`.
+    //
+    // `gh pr edit` resolves repository/organisation metadata over GraphQL, and
+    // those fields (login, name, slug) demand the read:org scope. A token with
+    // only repo scope therefore fails the whole label operation with:
+    //   "The 'login' field requires one of the following scopes: ['read:org']"
+    // The REST call below needs nothing beyond repo scope, and a PR is also an
+    // issue, so the numeric issue number is the correct resource id.
+    const prNumber = pr.trim().replace(/\/+$/, "").split("/").pop() ?? "";
+    if (!/^\d+$/.test(prNumber)) {
+      throw new Error(`Could not derive a pull request number from "${pr}"`);
+    }
+    const args = [
+      "api",
+      "-X",
+      "POST",
+      `repos/${this.repoArg}/issues/${prNumber}/labels`,
+    ];
     for (const label of labels) {
-      args.push("--add-label", label);
+      args.push("-f", `labels[]=${label}`);
     }
     const result = await this.gh(args);
     if (result.exitCode !== 0) {
